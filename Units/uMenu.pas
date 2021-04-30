@@ -12,7 +12,7 @@ uses
   FireDAC.Phys.PGDef, FireDAC.VCLUI.Wait, FireDAC.Comp.Client, FireDAC.Comp.UI,
   FireDAC.Phys.PG, Data.DB, FireDAC.Comp.DataSet, AdvGroupBox,Vcl.AppEvnts,
   frxClass,frxExportBaseDialog,frxExportPDF, AdvOfficeStatusBar,
-  AdvOfficeStatusBarStylers;
+  AdvOfficeStatusBarStylers, System.Threading, BiblKhronos, Winapi.ShEllAPI;
 
 type
   TFrmMenu = class(TForm)
@@ -34,15 +34,18 @@ type
     procedure FormShow(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
-    procedure ImgConfigClick(Sender: TObject);
+    procedure ImgConfigClick(Sender: TObject);   
+
   private
     { Private declarations }
     FTimer : TTimer;
-    procedure MostrarDisplay(const pTexto : String);
     procedure ZerarDisplay;
     procedure VerificarFilaImportacao(Sender : TObject);
+
   public
     { Public declarations }
+    procedure MostrarDisplay(const pTexto : String);
+
   end;
 
 var
@@ -55,11 +58,14 @@ implementation
 
 { TFrmMenu }
 
-Uses BiblKhronos,Configuracoes.Monitor.GestaoFiscal,uMensagem;
+Uses Configuracoes.Monitor.GestaoFiscal,uMensagem, uArquivo, uDMImportacaoXML;
 
 procedure TFrmMenu.FormCreate(Sender: TObject);
 begin
   FTimer := TTimer.Create(nil);
+
+  if not Assigned(DMImportacaoXML) then
+    DMImportacaoXML   := TDMImportacaoXML.Create(Self);
 end;
 
 procedure TFrmMenu.FormDestroy(Sender: TObject);
@@ -78,6 +84,11 @@ begin
 
   ZerarDisplay;
   MostrarDisplay(vTextoDisplay);
+
+  if not DirectoryExists(ConfiguracoesMonitorGestaoFiscal.DirImportadosXML) then
+    ForceDirectories(ConfiguracoesMonitorGestaoFiscal.DirImportadosXML);
+  if not DirectoryExists(ConfiguracoesMonitorGestaoFiscal.DirImportacaoXML) then
+    ForceDirectories(ConfiguracoesMonitorGestaoFiscal.DirImportacaoXML);
 
   FTimer.Interval   := ConfiguracoesMonitorGestaoFiscal.TempoVerificacaoXML * 1000;
   FTimer.OnTimer    := VerificarFilaImportacao;
@@ -102,17 +113,29 @@ end;
 
 procedure TFrmMenu.VerificarFilaImportacao(Sender : TObject);
 var
-  vEncontrouXML : Boolean;
   vNumeroDeXML  : Integer;
+  vListaXML   : TStringList;
 begin
-  vEncontrouXML := False;
+  if ConfiguracoesMonitorGestaoFiscal.DirImportacaoXML = '' then
+    MostrarDisplay('Informe o diretório dos arquivos xml(s) no ' +
+                    'arquivo de configuração e tente novamente!');
+
+  if not TXML.Listar(ConfiguracoesMonitorGestaoFiscal.DirImportacaoXML) then
+  begin
+    MostrarDisplay(FormatDateTime('dd/mm/yyyy hh:mm:ss', now) + ' Arquivo xml(s) não encontrado no diretório informado.');
+    Exit;
+  end;
+
+  if not TXML.GetListaXML(vListaXML) then
+  begin
+    MostrarDisplay('Erro ao obter lista de xml encontrados!');
+    Exit;
+  end;
+
   try
     MostrarDisplay(FormatDateTime('dd/mm/yyyy hh:mm:ss',Now) + ' - Procurando xml na pasta ' + ConfiguracoesMonitorGestaoFiscal.DirImportacaoXML + ' ...');
   finally
-    if vEncontrouXML then
-      MostrarDisplay(FormatDateTime('dd/mm/yyyy hh:mm:ss',Now) +' - Importado(s) ' + vNumeroDeXML.ToString + ' xml(s).')
-    else
-      MostrarDisplay(FormatDateTime('dd/mm/yyyy hh:mm:ss',Now) +' - não encontrado XML a importar na pasta ' + ConfiguracoesMonitorGestaoFiscal.DirImportacaoXML + '.');
+    DMImportacaoXML.ImportarXML(ConfiguracoesMonitorGestaoFiscal.DirImportacaoXML, vListaXML);
   end;
 end;
 

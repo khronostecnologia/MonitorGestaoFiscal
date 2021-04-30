@@ -10,7 +10,7 @@ uses
   FireDAC.Comp.Client, ACBrDFeReport, ACBrDFeDANFeReport, ACBrNFeDANFEClass,
   ACBrNFeDANFEFR,W7ProgressBars,Vcl.Forms,pcnNFe,pcnConversaoNFe,
   pcnConversao,System.Generics.Collections,ACBrCTe,pcteCTe,pcteConversaoCTe,
-  BiblKhronos,Vcl.StdCtrls;
+  BiblKhronos,Vcl.StdCtrls, Windows;
 
 type
   TDMImportacaoXML = class(TDataModule)
@@ -626,7 +626,6 @@ type
   private
     { Private declarations }
     FNomeArqLog              : String;
-    FSequence                : Double;
     FLstPessoas              : TDictionary <String,String>;
     FDataHoraImportacao      : TDateTime;
     FNomeUnicoEmpresa        : String;
@@ -666,6 +665,10 @@ type
     function  GetSQLDeleteDetalhesCTe(const pCodPart, pMes,pAno: String): String;Overload;
 
     function  GetSQLDeleteLoteImportacaoXML(const pModeloXML : TFinalidadeTela; pDataImportacaoLoteXML : TDateTime) : String;
+    procedure DefineContadorDasTarefas(var pArrayContInicial, pArrayContadorFinal: array of Integer);
+    procedure GetContagemRegistro(var pArrayContInicial, pArrayContadorFinal: array of Integer; const pIdxArrayLote1, pIdxArrayLote2, pTotalRegistros: Integer);
+    procedure GravaImportacao;
+    function ClearDirectory(aDirectory: String): Boolean;
   public
     { Public declarations }
     NFe   : TACBrNFe;
@@ -679,19 +682,22 @@ type
     function  ExcluirXMLCTe : Boolean;
     function  ExcluiLoteImportacaoXML(const pModeloXML : TFinalidadeTela; pDataImportacaoLoteXML : TDateTime):Boolean;
     function  GetEmpresa(pQryEmpresa : TFDQuery ; ACodigo: String): Boolean;
-    function  ExecImportacaoNF(const pContInicial , pContFinal , pLoteImp : Integer; var pDtsNF , pDtsNFItens : TFDMemTable ; pArrayNF , pArrayNFItens , pQryImportadoXML , pQryBscEmpresa , pQryCadEmpresa : TFDQuery ; pLabelInformativa : TLabel ; pProgressBar : TW7ProgressBar): Boolean;
-    function  ExecImportacaoCTe : Boolean;
+    function  ExecImportacaoNF(const pContInicial , pContFinal , pLoteImp : Integer; pNroSequencial : Double; var pDtsNF , pDtsNFItens : TFDMemTable ; pArrayNF , pArrayNFItens , pQryImportadoXML , pQryBscEmpresa , pQryCadEmpresa : TFDQuery): Boolean;
+    function  ExecImportacaoCTe(pNroSequencial : Double) : Boolean;
+    function  GetTotalizadorProcessamento(const pIdxInicial , pIdxFinal : Integer): Double;
+    function  GeTotalizadorDetCte : Integer;
     procedure AddCadastroEmpresa(pQryCadEmpresa : TFDQuery; pCodEmpresa, pEmpresa: String; pDataCadastro : TDateTime);
     procedure DeleteNF;
     procedure DeleteCTe;
     procedure DeletaTodasNF(pCodPart , pMes, pAno : String);
     procedure DeletaTodosCte(pCodPart , pMes, pAno : String);
     procedure Cancelar;
-    procedure CarregaXMLsParaAcbr(const pListaXML: TStringList; pDir: String; var pLabelInformativa : TLabel ; pProgressBar : TW7ProgressBar; pFinalidade : TFinalidadeTela);
+    procedure CarregaXMLsParaAcbr(const pListaXML: TStringList; pDir: String);
     procedure CriarObjetos;
     procedure DestruirObjetos;
     procedure PreparaDataSets;
     procedure ZerarArrayDML;
+    procedure ImportarXML(const pDiretorio: String; pStrList: TStringList);
     property  NomeArqLog : String read FNomeArqLog write SetNomeArqLog;
   end;
 
@@ -705,7 +711,8 @@ implementation
 {$R *.dfm}
 
 Uses
-  uDMBase,uImportacaoXML,uMensagem,uBarraProgresso,uLog;
+  uDMBase, uMensagem,uBarraProgresso,uLog, uMenu,
+  Configuracoes.Monitor.GestaoFiscal;
 
 procedure TDMImportacaoXML.Cancelar;
 var
@@ -721,35 +728,197 @@ begin
   end;
 end;
 
-procedure TDMImportacaoXML.CarregaXMLsParaAcbr(const pListaXML: TStringList; pDir: String; var pLabelInformativa : TLabel ; pProgressBar : TW7ProgressBar; pFinalidade : TFinalidadeTela);
+procedure TDMImportacaoXML.ImportarXML(const pDiretorio: String; pStrList: TStringList);
+const
+  cLote1          = 1;
+  cLote2          = 2;
+var
+  //vTasks      : Array [0..1] of ITask;
+  vIniProc    : Array [0..1] of Integer;
+  vFinProc    : Array [0..1] of Integer;
+
+  //vThread             : TThread;
+
+  vImportado : Array [0..2] of Boolean;
+  vNroSequencia       : Double;
+begin
+  try
+     CriarObjetos;
+     CarregaXMLsParaAcbr(pStrList,
+                         pDiretorio
+                         );
+
+     PreparaDataSets;
+     ZerarArrayDML;
+     DefineContadorDasTarefas(vIniProc,vFinProc);
+
+     frmMenu.MostrarDisplay('Iniciando importação do XML(s)...');
+     vNroSequencia := GetSequence(Random(100));
+
+     If NFe.NotasFiscais.Count > 0 then
+     begin
+         vImportado[0] := ExecImportacaoNF(
+                                        vIniProc[0] ,
+                                        vFinProc[0] ,
+                                        cLote1 ,
+                                        vNroSequencia,
+                                        MemNF_1,
+                                        MemItensNF_1,
+                                        QryArrayNF_1,
+                                        QryArrayItensNF_1,
+                                        QryXMLImportado_1,
+                                        QryEmpresaImportada_1,
+                                        QryCadEmpresa_1
+                                       );
+
+         {Verifica se existe registros para importar no segundo processamento}
+         if vIniProc[1] <> 0 then
+         begin
+           Sleep(1500);
+           vNroSequencia := vNroSequencia + (NFe.NotasFiscais.Count + GetTotalizadorProcessamento(vIniProc[0],vFinProc[0]));
+           vNroSequencia := vNroSequencia + 2;
+           vImportado[1] := ExecImportacaoNF(
+                                              vIniProc[1],
+                                              vFinProc[1],
+                                              cLote2 ,
+                                              vNroSequencia,
+                                              MemNF_2,
+                                              MemItensNF_2,
+                                              QryArrayNF_2,
+                                              QryArrayItensNF_2,
+                                              QryXMLImportado_2,
+                                              QryEmpresaImportada_2,
+                                              QryCadEmpresa_2
+                                              );
+         end;
+     end;
+
+     vImportado[2]          := ExecImportacaoCTe(GetSequence(Random(100)));
+
+     FreeAndNil(pStrList);
+     DestruirObjetos;
+
+     if vImportado[0] or vImportado[1] or vImportado[2] then
+       GravaImportacao
+     else
+     begin
+       frmMenu.MostrarDisplay('Não identificado novo XML á importar!');
+       Exit;
+     end;
+
+     frmMenu.MostrarDisplay('Registros carregados com sucesso.');
+
+     if MemNF_1.RecordCount > 0 then
+     begin
+       MemNF.CopyDataSet(MemNF_1);
+       MemNF.CopyDataSet(MemNF_2);
+
+       MemItensNF.CopyDataSet(MemItensNF_1);
+       MemItensNF.CopyDataSet(MemItensNF_2);
+     end;
+
+     Application.ProcessMessages;
+  except
+    on e: EAbort do
+    begin
+      frmMenu.MostrarDisplay(e.Message);
+
+      Exit;
+    end;
+
+    on e: exception do
+    begin
+      frmMenu.MostrarDisplay('Erro : ' + e.Message + ' ao tentar importar o XML.');
+
+      Exit;
+    end;
+  end;
+end;
+
+function TDMImportacaoXML.ClearDirectory(aDirectory : String) : Boolean;
+var
+  SR: TSearchRec;
+  I: integer;
+begin
+  I := FindFirst(aDirectory + '*.*', faAnyFile, SR);
+  while I = 0 do
+  begin
+    if (SR.Attr and faDirectory) <> faDirectory then
+    begin
+      if not DeleteFile(PChar(aDirectory + SR.Name)) then
+      begin
+        Result := False;
+        Exit;
+      end;
+    end;
+
+    I := FindNext(SR);
+  end;
+
+  Result := True;
+end;
+
+procedure TDMImportacaoXML.DefineContadorDasTarefas(var pArrayContInicial, pArrayContadorFinal : array of Integer);
+Const
+  cIdxNF_1 = 0;
+  cIdxNF_2 = 1;
+begin
+  if NFe.NotasFiscais.Count > 0 then
+  begin
+    GetContagemRegistro(
+                        pArrayContInicial,
+                        pArrayContadorFinal,
+                        cIdxNF_1,
+                        cIdxNF_2,
+                        NFe.NotasFiscais.Count
+                       );
+  end;
+end;
+
+procedure TDMImportacaoXML.GetContagemRegistro(var pArrayContInicial , pArrayContadorFinal : Array of Integer; const pIdxArrayLote1 , pIdxArrayLote2 , pTotalRegistros : Integer);
+begin
+  {Trata divisão de numero par e impar}
+  if pTotalRegistros = 1 then
+  begin
+    pArrayContInicial[pIdxArrayLote1]   := 0;
+    pArrayContadorFinal[pIdxArrayLote1] := 0;
+
+    pArrayContInicial[pIdxArrayLote2]   := 0;
+    pArrayContadorFinal[pIdxArrayLote2] := 0;
+  end
+  else
+  begin
+    pArrayContInicial[pIdxArrayLote1]   := 0;
+    pArrayContadorFinal[pIdxArrayLote1] := Trunc(Pred(pTotalRegistros)) div 2;
+
+    pArrayContInicial[pIdxArrayLote2]   := Pred(pTotalRegistros) - pArrayContadorFinal[pIdxArrayLote1];
+
+    if pArrayContadorFinal[pIdxArrayLote1] = pArrayContInicial[pIdxArrayLote2] then
+      pArrayContInicial[pIdxArrayLote2]   := pArrayContInicial[pIdxArrayLote2] + 1;
+
+    pArrayContadorFinal[pIdxArrayLote2] := Pred(pTotalRegistros);
+  end;
+end;
+
+procedure TDMImportacaoXML.CarregaXMLsParaAcbr(const pListaXML: TStringList; pDir: String);
 var
   i               : Integer;
   vCaminhoArquivo : String;
 begin
-
   NFe.NotasFiscais.Clear;
   CTe.Conhecimentos.Clear;
-
-  pLabelInformativa.Caption := 'Procurando XML(s) no diretório ...';
-  pProgressBar.Min              := 0;
-  pProgressBar.Max              := pListaXML.Count;
-  FrmImportacaoXML.Repaint;
 
   for I := 0 to Pred(pListaXML.Count) do
   begin
     vCaminhoArquivo := pDir + '\' + pListaXML[i];
-    pLabelInformativa.Caption := 'Carregando XML ' + IntToStr(i + 1) + ' de ' + pListaXML.Count.ToString + ' itens da pasta.';
-    FrmImportacaoXML.Repaint;
+    frmMenu.MostrarDisplay('Carregando XML ' + IntToStr(i + 1) + ' de ' + pListaXML.Count.ToString + ' itens da pasta.');
 
-    if pFinalidade = ftImportarCTe then
-      CTe.Conhecimentos.LoadFromFile(vCaminhoArquivo)
-    else
-      NFe.NotasFiscais.LoadFromFile(vCaminhoArquivo);
+    CTe.Conhecimentos.LoadFromFile(vCaminhoArquivo);
+    NFe.NotasFiscais.LoadFromFile(vCaminhoArquivo);
 
-    pProgressBar.Position := pProgressBar.Position + 1;
-    FrmImportacaoXML.Repaint;
+    CopyFile(StringToOleStr(vCaminhoArquivo), StringToOleStr(ConfiguracoesMonitorGestaoFiscal.DirImportadosXML + '\' + pListaXML[i]),False);
+    DeleteFile(StringToOleStr(vCaminhoArquivo));
   end;
-
 end;
 
 procedure TDMImportacaoXML.CriarObjetos;
@@ -770,10 +939,10 @@ begin
 
       FNomeArqLog := dmPrincipal.GetNomeArqLog;
 
-      TLog.Gravar(dmPrincipal.DirImportacaoXML,FNomeArqLog,'Lote de XML EMP: ' +
-                  MemNFEMPRESA.AsString +
-                  ' mes : ' + MemNFMES.AsString + '| ano : ' + MemNFANO.AsString +
-                  ' deletado');
+//      TLog.Gravar(dmPrincipal.DirImportacaoXML,FNomeArqLog,'Lote de XML EMP: ' +
+//                  MemNFEMPRESA.AsString +
+//                  ' mes : ' + MemNFMES.AsString + '| ano : ' + MemNFANO.AsString +
+//                  ' deletado');
       Commit;
     except
       on e: exception do
@@ -996,7 +1165,7 @@ begin
   result := not (pQry.IsEmpty);
 end;
 
-function TDMImportacaoXML.ExecImportacaoCTe : Boolean;
+function TDMImportacaoXML.ExecImportacaoCTe(pNroSequencial : Double) : Boolean;
 const
   cModeloCTe  = 57;
 var
@@ -1022,6 +1191,7 @@ var
   vVL_BC            : Double;
   vVL_ICMS          : Double;
   vP_ICMS           : Double;
+  vNroSequencial    : Double;
 
 begin
   result := false;
@@ -1054,6 +1224,7 @@ begin
     vIdxArrayCteDest   := 0;
     vIdxArrayCteImp    := 0;
     vIdxArrayCteDoc    := 0;
+    vNroSequencial     := pNroSequencial;
 
     with CTe.Conhecimentos do
     begin
@@ -1068,24 +1239,14 @@ begin
           continue;
         end;
 
-        FrmImportacaoXML.lblInfoImportacaoXML.Caption := 'Importando XML : ' +
-                                                         IntToStr(i + 1) +
-                                                         ' de ' + Count.ToString;
-
-        FrmImportacaoXML.Repaint;
-
-        if FrmImportacaoXML.Cancelado then
-        begin
-          Cancelar;
-          Abort;
-        end;
+        frmMenu.MostrarDisplay('Importando XML : ' + IntToStr(i + 1) + ' de ' + Count.ToString);
 
         GetDadosEmpresa(Items[i].Cte,vxNome,vXCNPJ);
 
         with Items[i].Cte do
         begin
           MemCTe.Insert;
-          vIdCTe                      := IncKhronos(FSequence);
+          vIdCTe                      := IncKhronos(vNroSequencial);
           MemCTeID.AsString           := vIdCTe;
           MemCTeDT_EMIS.AsDateTime    := ide.dhEmi;
           MemCTeCFOP.AsString         := ide.CFOP.ToString;
@@ -1190,7 +1351,7 @@ begin
 
           {Emitente}
           MemCTeEmit.Insert;
-          MemCTeEmitID.AsString           := IncKhronos(FSequence);
+          MemCTeEmitID.AsString           := IncKhronos(vNroSequencial);
           MemCTeEmitIDCTE.AsString        := vIdCTe;
           MemCTeEmitCNPJ.AsString         := emit.CNPJ;
           MemCTeEmitENDERECO.AsString     := emit.enderEmit.xLgr;
@@ -1233,7 +1394,7 @@ begin
           begin
             {Remetente}
             MemCTeRem.Insert;
-            MemCTeRemID.AsString           := IncKhronos(FSequence);
+            MemCTeRemID.AsString           := IncKhronos(vNroSequencial);
             MemCTeRemIDCTE.AsString        := vIdCTe;
             MemCTeRemCNPJ.AsString         := rem.CNPJCPF;
             MemCTeRemENDERECO.AsString     := rem.enderReme.xLgr;
@@ -1276,7 +1437,7 @@ begin
           begin
             {EXPEDIDOR}
             MemCTeExt.Insert;
-            MemCTeExtID.AsString           := IncKhronos(FSequence);
+            MemCTeExtID.AsString           := IncKhronos(vNroSequencial);
             MemCTeExtIDCTE.AsString        := vidCTe;
             MemCTeExtCNPJ.AsString         := exped.CNPJCPF;
             MemCTeExtENDERECO.AsString     := exped.enderExped.xLgr;
@@ -1320,7 +1481,7 @@ begin
           begin
             {RECEBEDOR}
             MemCTeReceb.Insert;
-            MemCTeRecebID.AsString           := IncKhronos(FSequence);
+            MemCTeRecebID.AsString           := IncKhronos(vNroSequencial);
             MemCTeRecebIDCTE.AsString        := vIdCte;
             MemCTeRecebCNPJ.AsString         := receb.CNPJCPF;
             MemCTeRecebENDERECO.AsString     := receb.enderReceb.xLgr;
@@ -1363,7 +1524,7 @@ begin
           begin
             {DESTINATARIO}
             MemCTeDest.Insert;
-            MemCTeDestID.AsString           := IncKhronos(FSequence);
+            MemCTeDestID.AsString           := IncKhronos(vNroSequencial);
             MemCTeDestIDCTE.AsString        := vIdCte;
             MemCTeDestCNPJ.AsString         := dest.CNPJCPF;
             MemCTeDestENDERECO.AsString     := dest.enderDest.xLgr;
@@ -1405,7 +1566,7 @@ begin
           {IMPOSTOS}
           GetDadosImpostos(imp.ICMS,vCST,vVL_BC,vVL_ICMS,vP_ICMS);
           MemCTeImpostos.Insert;
-          MemCTeImpostosID.AsString           := IncKhronos(FSequence);
+          MemCTeImpostosID.AsString           := IncKhronos(vNroSequencial);
           MemCTeImpostosIDCTE.AsString        := vIdCte;
           MemCTeImpostosCST.AsString          := vCST;
           MemCTeImpostosVL_BC.AsFloat         := vVL_BC;
@@ -1443,7 +1604,7 @@ begin
               QryArrayCTeDoc.Params.ArraySize := vIdxArrayCteDoc + 1;
 
               MemCTeDoc.Insert;
-              MemCTeDocID.AsString           := IncKhronos(FSequence);
+              MemCTeDocID.AsString           := IncKhronos(vNroSequencial);
               MemCTeDocIDCTE.AsString        := vIdCte;
               MemCTeDocCHV_NFE.AsString      := infCTeNorm.infDoc.infNFe.Items[j].chave;
               MemCTeDocSELECIONADO.AsString  := 'N';
@@ -1463,14 +1624,8 @@ begin
               Inc(vIdxArrayCteDoc);
             end;
           end;
-
         end;
-
-        FrmImportacaoXML.ProgressBar.Position := FrmImportacaoXML.ProgressBar.Position + 1;
-        FrmImportacaoXML.Repaint;
-
       end;
-
     end;
 
     result := (vIdxArrayCte > 0);
@@ -1487,7 +1642,7 @@ begin
   end;
 end;
 
-function TDMImportacaoXML.ExecImportacaoNF(const pContInicial , pContFinal , pLoteImp : Integer; var pDtsNF , pDtsNFItens : TFDMemTable ; pArrayNF , pArrayNFItens , pQryImportadoXML , pQryBscEmpresa , pQryCadEmpresa : TFDQuery ; pLabelInformativa : TLabel ; pProgressBar : TW7ProgressBar): Boolean;
+function TDMImportacaoXML.ExecImportacaoNF(const pContInicial , pContFinal , pLoteImp : Integer; pNroSequencial : Double; var pDtsNF , pDtsNFItens : TFDMemTable ; pArrayNF , pArrayNFItens , pQryImportadoXML , pQryBscEmpresa , pQryCadEmpresa : TFDQuery): Boolean;
 const
   cModeloNFe = 55;
 var
@@ -1501,42 +1656,32 @@ var
 
   vIdxArrayNfe      : Integer;
   vIdxArrayItensNF  : Integer;
+  vNroSequencial    : Double;
 begin
   result := false;
   try
     vIdxArrayNfe                   := 0;
     vIdxArrayItensNF               := 0;
+    vNroSequencial                 := pNroSequencial;
 
     AtivaPerformanceMemTable(pDtsNF,pContFinal);
     pDtsNF.BeginBatch;
 
-
     with NFe.NotasFiscais do
     begin
-
-      for i := 0 to Pred(Count) do
+      for i := pContInicial to pContFinal do
       begin
-
         vChaveAcesso := Copy(Items[i].NFe.infNFe.ID,4,44);
+        frmMenu.MostrarDisplay('Consultando XML (' + IntToStr(i + 1) + ') de (' + Count.ToString + ') chave de acesso : ' +  vChaveAcesso +  ' na base de dados');
 
         if not EsteXMLJaFoiImportado(vChaveAcesso,pQryImportadoXML) then
         begin
-
-          pLabelInformativa.Caption := 'Importando XML : ' + IntToStr(i + 1) + ' de ' + Count.ToString;
-
-          FrmImportacaoXML.Repaint;
-
-          if FrmImportacaoXML.Cancelado then
-          begin
-            Cancelar;
-            Abort;
-          end;
-
+          frmMenu.MostrarDisplay('Importando XML : ' + IntToStr(i + 1) + ' de ' + Count.ToString);
 
           with Items[i].NFe do
           begin
             pDtsNF.Insert;
-            vIDNfe                     := IncKhronos(FSequence);
+            vIDNfe                                      := IncKhronos(vNroSequencial);
             pDtsNF.FieldByName('ID').AsString           := vIDNfe;
             pDtsNF.FieldByName('DT_DOC').AsDateTime     := Ide.dEmi;
 
@@ -1710,7 +1855,7 @@ begin
                with Det.Items[j] do
                begin
                  pDtsNFItens.Insert;
-                 pDtsNFItens.FieldByName('ID').AsString             := IncKhronos(FSequence);
+                 pDtsNFItens.FieldByName('ID').AsString             := IncKhronos(vNroSequencial);
                  pDtsNFItens.FieldByName('IDNF').AsString           := vIdNFe;
                  pDtsNFItens.FieldByName('NUM_ITEM').AsInteger      := Prod.nItem;
                  pDtsNFItens.FieldByName('COD_ITEM').AsString       := Prod.cProd;
@@ -1947,23 +2092,9 @@ begin
                  Inc(vIdxArrayItensNF);
                end;
              end;
-
-            pProgressBar.Position := pProgressBar.Position + 1;
-            FrmImportacaoXML.Repaint;
-
-            if FrmImportacaoXML.Cancelado then
-            begin
-              Cancelar;
-              Abort;
-            end;
-
           end;
-
-
         end;
-
       end;
-
     end;
 
     result := (vIdxArrayNfe > 0);
@@ -2112,6 +2243,13 @@ begin
   end;
 end;
 
+function TDMImportacaoXML.GeTotalizadorDetCte: Integer;
+begin
+  Result := 0;
+
+
+end;
+
 function TDMImportacaoXML.GetTodasNF(pCodPart, pMes, pAno: String): Boolean;
 var
   vQry : TFDQuery;
@@ -2195,6 +2333,35 @@ begin
   end;
 end;
 
+function TDMImportacaoXML.GetTotalizadorProcessamento(const pIdxInicial,
+  pIdxFinal: Integer): Double;
+var
+  I : Integer;
+begin
+  Result := 0;
+
+  for I := pIdxInicial to pIdxFinal do
+  begin
+
+    with NFe.NotasFiscais.Items[I] do
+    begin
+      Result := Result + 1;
+      Result := Result + NFe.Det.Count;
+    end;
+
+  end;
+end;
+
+procedure TDMImportacaoXML.GravaImportacao;
+begin
+  frmMenu.MostrarDisplay('Gravando dados importados ....');
+
+  if not GravarImportacao then
+    Exit;
+
+  frmMenu.MostrarDisplay('Importação salva com sucesso!');
+end;
+
 function TDMImportacaoXML.GetTpcnCSTIcmsToStr(const pCST: TpcnCSTIcms): String;
 begin
   case pCST of
@@ -2230,61 +2397,61 @@ begin
 
     if QryArrayNF_1.Params.ArraySize > 0 then
     begin
-      FrmMensagem.MostraMensagem('Gravando dados Nota fiscal (1) ...');
+      FrmMenu.MostrarDisplay('Gravando dados Nota fiscal (1) ...');
       ExecutaArrayDMLEmBatch(QryArrayNF_1,500);
-      FrmMensagem.MostraMensagem('Gravando dados dos itens (1) da Nota fiscal ...');
+      frmMenu.MostrarDisplay('Gravando dados dos itens (1) da Nota fiscal ...');
       ExecutaArrayDMLEmBatch(QryArrayItensNF_1,500);
     end;
 
     if QryArrayNF_2.Params.ArraySize > 0 then
     begin
-      FrmMensagem.MostraMensagem('Gravando dados Nota fiscal (2) ...');
+      frmMenu.MostrarDisplay('Gravando dados Nota fiscal (2) ...');
       ExecutaArrayDMLEmBatch(QryArrayNF_2,500);
-      FrmMensagem.MostraMensagem('Gravando dados dos itens (2) da Nota fiscal ...');
+      frmMenu.MostrarDisplay('Gravando dados dos itens (2) da Nota fiscal ...');
       ExecutaArrayDMLEmBatch(QryArrayItensNF_2,500);
     end;
 
     if QryArrayCTe.Params.ArraySize > 0 then
     begin
-      FrmMensagem.MostraMensagem('Gravando dados do CTe ...');
+      frmMenu.MostrarDisplay('Gravando dados do CTe ...');
       ExecutaArrayDMLEmBatch(QryArrayCTe,500);
 
-      FrmMensagem.MostraMensagem('Gravando dados do emitente do CTe ...');
+      frmMenu.MostrarDisplay('Gravando dados do emitente do CTe ...');
       ExecutaArrayDMLEmBatch(QryArrayCTeEmit,500);
 
       if QryArrayCTeRem.Params.ArraySize > 0 then
       begin
-        FrmMensagem.MostraMensagem('Gravando dados do remetente do CTe ...');
+        frmMenu.MostrarDisplay('Gravando dados do remetente do CTe ...');
         ExecutaArrayDMLEmBatch(QryArrayCTeRem,500);
       end;
 
       if QryArrayCTeExt.Params.ArraySize > 0 then
       begin
-        FrmMensagem.MostraMensagem('Gravando dados do expedidor do CTe ...');
+        frmMenu.MostrarDisplay('Gravando dados do expedidor do CTe ...');
         ExecutaArrayDMLEmBatch(QryArrayCTeExt,500);
       end;
 
       if QryArrayCTeReceb.Params.ArraySize > 0 then
       begin
-        FrmMensagem.MostraMensagem('Gravando dados do recebedor do CTe ...');
+        frmMenu.MostrarDisplay('Gravando dados do recebedor do CTe ...');
         ExecutaArrayDMLEmBatch(QryArrayCTeReceb,500);
       end;
 
       if QryArrayCTeDest.Params.ArraySize > 0 then
       begin
-        FrmMensagem.MostraMensagem('Gravando dados do destinatário do CTe ...');
+        frmMenu.MostrarDisplay('Gravando dados do destinatário do CTe ...');
         ExecutaArrayDMLEmBatch(QryArrayCTeDest,500);
       end;
 
       if QryArrayCTeImpostos.Params.ArraySize > 0 then
       begin
-        FrmMensagem.MostraMensagem('Gravando dados do imposto do CTe ...');
+        frmMenu.MostrarDisplay('Gravando dados do imposto do CTe ...');
         ExecutaArrayDMLEmBatch(QryArrayCTeImpostos,500);
       end;
 
       if QryArrayCTeDoc.Params.ArraySize > 0 then
       begin
-        FrmMensagem.MostraMensagem('Gravando dados do inf.Doc do CTe ...');
+        frmMenu.MostrarDisplay('Gravando dados do inf.Doc do CTe ...');
         ExecutaArrayDMLEmBatch(QryArrayCTeDoc,500);
       end;
     end;
@@ -2309,11 +2476,11 @@ procedure TDMImportacaoXML.PreparaDataSets;
 var
   i : Integer;
 begin
-  for I := 0 to Pred(DMImportacaoXML.ComponentCount) do
+  for I := 0 to Pred(ComponentCount) do
   begin
-    if DMImportacaoXML.Components[i] Is TFDMemTable then
+    if Components[i] Is TFDMemTable then
     begin
-      with TFDMemTable(DMImportacaoXML.Components[i]) do
+      with TFDMemTable(Components[i]) do
       begin
         close;
         active        := true;
