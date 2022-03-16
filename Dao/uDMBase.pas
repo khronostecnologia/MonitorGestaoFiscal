@@ -25,16 +25,28 @@ type
     QryCadEmpresaDT_CADASTRO: TDateTimeField;
     FDPhysPgDriverLink1: TFDPhysPgDriverLink;
   private
+    FDirApp: String;
+    FDirRaizApp: String;
+    FDirLogGeral: String;
+    FDirImportacaoXML: String;
+    procedure SetDirApp(const Value: String);
+    procedure SetDirImportacaoXML(const Value: String);
+    procedure SetDirLogGeral(const Value: String);
+    procedure SetDirRaizApp(const Value: String);
     { Private declarations }
   public
     { Public declarations }
+    class var BancoExec : TFDConnection;
     procedure ConectaBanco(const pDirArqConfigIni : String);
     function GetEmpresa(ACodigo : String):Boolean;
     function GetNomeArqLog : String;
     procedure AddCadastroEmpresa(pCodEmpresa, pEmpresa: String; pDataCadastro : TDateTime);
     procedure CancelarCadastroEmpresa;
     procedure GravaCadastroEmpresa;
-    class var BancoExec : TFDConnection;
+    property DirApp : String read FDirApp write SetDirApp;
+    property DirRaizApp : String read FDirRaizApp write SetDirRaizApp;
+    property DirImportacaoXML : String read FDirImportacaoXML write SetDirImportacaoXML;
+    property DirLogGeral : String read FDirLogGeral write SetDirLogGeral;
   end;
 
 var
@@ -155,6 +167,26 @@ begin
     CommitUpdates;
   end;
 
+end;
+
+procedure TDMBase.SetDirApp(const Value: String);
+begin
+  FDirApp := Value;
+end;
+
+procedure TDMBase.SetDirImportacaoXML(const Value: String);
+begin
+  FDirImportacaoXML := Value;
+end;
+
+procedure TDMBase.SetDirLogGeral(const Value: String);
+begin
+  FDirLogGeral := Value;
+end;
+
+procedure TDMBase.SetDirRaizApp(const Value: String);
+begin
+  FDirRaizApp := Value;
 end;
 
 end.

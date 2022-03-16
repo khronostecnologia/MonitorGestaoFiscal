@@ -5,18 +5,23 @@ uses
   Midas,
   SysUtils,
   uMenu in 'Units\uMenu.pas' {FrmMenu},
-  BiblKhronos in '..\..\Util\trunk\BiblKhronos.pas',
   uDMBase in 'Dao\uDMBase.pas' {DMBase: TDataModule},
-  uMensagem in '..\..\Util\trunk\uMensagem.pas' {FrmMensagem},
-  Configuracoes in '..\..\Util\trunk\Configuracoes.pas',
-  Configuracoes.Monitor.GestaoFiscal in 'Classes\Configuracoes.Monitor.GestaoFiscal.pas';
+  uMensagem in '..\Util\uMensagem.pas' {FrmMensagem},
+  Configuracoes in '..\Util\Configuracoes.pas',
+  Configuracoes.Monitor.GestaoFiscal in 'Classes\Configuracoes.Monitor.GestaoFiscal.pas',
+  BiblKhronos in '..\Util\BiblKhronos.pas',
+  uArquivo in '..\Util\uArquivo.pas',
+  uDMImportacaoXML in '..\KhronosXAccounting\Dao\uDMImportacaoXML.pas' {DMImportacaoXML: TDataModule},
+  uImportacaoXML in '..\KhronosXAccounting\Units\uImportacaoXML.pas',
+  uMaster in '..\Heranca\View\uMaster.pas' {FrmMaster},
+  uGenerico in '..\Util\uGenerico.pas',
+  uLog in '..\Util\uLog.pas';
 
 {$R *.res}
 begin
   Application.Initialize;
   Application.MainFormOnTaskbar := True;
   Application.CreateForm(TFrmMenu, FrmMenu);
-
   FrmMensagem   := TFrmMensagem.Create(nil);
   dmPrincipal   := TDMBase.create(nil);
 
